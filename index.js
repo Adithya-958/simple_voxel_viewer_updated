@@ -1,11 +1,13 @@
 var THREE = require('three');
 // var fs = window.require('fs');
+var OBJLoader = require('three-obj-loader')(THREE);
 var fs = require('browserify-fs');
 var OrbitControls = require('three-orbit-controls')(THREE);
 var $ = require("jquery");
 
 var renderer, scene, camera, grid, voxel=[];
 var voxel_mesh, voxel_geo, voxel_mat;
+var obj_mesh = null;
 var grid_size = 32; var cube_size = 10;
 var reader = new FileReader();
 
@@ -103,7 +105,42 @@ function fileLoad() {
     )
   });
 }
+function clearScene() {
+  // Clear voxel mesh if exists
+  if (voxel_mesh) {
+    scene.remove(voxel_mesh);
+    voxel_geo.dispose();
+    voxel_mat.dispose();
+    voxel_mesh = null;
+  }
+  
+  // Clear obj mesh if exists
+  if (obj_mesh) {
+    scene.remove(obj_mesh);
+    obj_mesh = null;
+  }
+}
 
+function centerAndScaleObject(object) {
+  var centering = $("#centering").prop("checked");
+  
+  // Calculate bounding box
+  var bbox = new THREE.Box3().setFromObject(object);
+  var center = bbox.getCenter(new THREE.Vector3());
+  var size = bbox.getSize(new THREE.Vector3());
+  
+  // Center if needed
+  if (centering) {
+    object.position.x = -center.x;
+    object.position.y = -center.y;
+    object.position.z = -center.z;
+  }
+  
+  // Auto-scale to fit view
+  var maxDim = Math.max(size.x, size.y, size.z);
+  var scale = (grid_size * cube_size * 0.5) / maxDim;
+  object.scale.setScalar(scale);
+}
 function argmax(v, axis) {
   idx = {
     'x': 0,
@@ -139,7 +176,11 @@ function argmin(v, axis) {
 //
 function plot_voxel(centering = true) {
   console.log("plotting!");
-
+    // Clear previous OBJ mesh if exists
+  if (obj_mesh) {
+    scene.remove(obj_mesh);
+    obj_mesh = null;
+  }
   // 既存のvoxelメッシュの削除
   if ( grid ) {
     scene.remove( grid );
@@ -230,15 +271,33 @@ function handleFileSelect(evt) {
     // fileLoad() will be called after read file
     reader.readAsArrayBuffer(files[0]);
   }
-  // } else if (ext == 'obj') {
-  //   var loader = new THREE.OBJLoader();
-  //   loader.load(
-  //     'models/monster.obj',
-  //      ( object ) => {
-  //        console.log(object);
-  //     }
-  //   );
-  // }
+  var ext = files[0].name.split('.').pop()
+  if (ext == 'binvox') {
+    // fileLoad() will be called after read file
+    reader.readAsArrayBuffer(files[0]);
+  } else if (ext == 'obj') { // <-- ADD THIS BLOCK
+    // Clear previous models
+    clearScene();
+    
+    var loader = new THREE.OBJLoader();
+    var file_url = URL.createObjectURL(files[0]);
+    
+    loader.load(file_url, 
+      (object) => {
+        obj_mesh = object;
+        centerAndScaleObject(object);
+        scene.add(object);
+      },
+      (progress) => {
+        // Optional: loading progress
+      },
+      (error) => {
+        $('#list').append(
+          `<div class="alert alert-danger" role="alert"> <strong>Error loading OBJ</strong>: ${error}</div>`
+        );
+      }
+    );
+  }
 }
 
 //
@@ -291,8 +350,12 @@ function init() {
 
   // オプション
   $('#centering').change(() => {
-    plot_voxel($('#centering').prop('checked'));
-  });
+    if (voxel_mesh) {
+      plot_voxel($('#centering').prop('checked'));
+    } else if (obj_mesh) {
+      centerAndScaleObject(obj_mesh);
+    }
+  }); 
   
   // 初回実行
   animate();
